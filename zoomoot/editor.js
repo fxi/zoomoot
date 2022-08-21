@@ -1,14 +1,10 @@
-import { el } from "@fxi/el";
-import { fabric } from "./filter_vignette";
-//import dataDefault from "./data_final.json";
 import WebMWriter from "webm-writer";
+import { el } from "@fxi/el";
 import { settings } from "./settings.js";
-
+import { images } from "./../main.js";
+import { fabric } from "./filter_vignette";
 fabric.Object.NUM_FRACTION_DIGITS = 100;
 fabric.Object.prototype.objectCaching = false;
-
-//const baseZoom = 282429536481;
-const baseZoom = 1;
 
 //const res = [];
 
@@ -17,81 +13,139 @@ const vignette = new fabric.Image.filters.Vignette({
   smoothness: 0.2,
 });
 
-const videoWriter = new WebMWriter({
-  quality: 0.95,
-  frameRate: settings.framerate,
-  transparent: false,
-});
-
 export { fabric };
 
 export class Editor {
-  constructor(elContainer, images) {
+  constructor(elContainer) {
     const zo = this;
     zo._el_container = elContainer;
     zo._images = images;
     zo.init().catch(console.error);
   }
-
-  n() {
+  async init() {
     const zo = this;
-    if (zo._curr < 0) {
-      return;
-    }
-    zo._curr--;
-    zo.v(false);
+    zo.lock();
+    zo.build();
+    zo.initAutoSave();
+    zo.initOpacityOnDrag();
+    zo.initZoom();
+    zo.render();
   }
-  v() {
+
+  setCenter(center) {
+    this._center = center || settings.center;
+  }
+  get center() {
+    return this._center || settings.center;
+  }
+
+  render() {
+    const zo = this;
+    zo._canvas.renderAll();
+  }
+
+  lock() {
+    this._locked = true;
+  }
+  get locked() {
+    return this._locked;
+  }
+  unlock() {
+    this._locked = false;
+  }
+  editFirst() {
+    const zo = this;
+    zo._curr = zo._n;
+    zo.editStep(zo._curr);
+  }
+  editNext() {
+    const zo = this;
+    zo._curr--;
+    if (zo._curr < 0) {
+      to._curr = zo._n;
+    }
+    zo.editStep(zo._curr);
+  }
+  editPrevious() {
+    const zo = this;
+    zo._curr++;
+    if (zo._curr > zo._n) {
+      zo._curr = 0;
+    }
+    zo.editStep(zo._curr);
+  }
+  editLast() {
+    const zo = this;
+    zo._curr = 0;
+    zo.editStep(zo._curr);
+  }
+  editStep(n) {
     const zo = this;
     const r = settings.ratio;
-    let imgToUpdate;
-    if (zo._locked === true) {
-      return;
+    if (zo._animate) {
+      alert("Editing is not possible during animation");
     }
+    zo.unlock();
+    let imgToUpdate;
+
+    if (typeof n !== "undefined" && n > -1 && n < zo._n) {
+      zo._curr = n;
+    }
+
     zo._canvas.forEachObject((img, i) => {
       if (i === zo._curr - 1) {
         imgToUpdate = img;
       }
     });
 
-    const alreadyUpdated = imgToUpdate.timestamp > 0;
-
     zo._canvas.forEachObject((img, i) => {
-      if (i === zo._curr && !alreadyUpdated) {
+      if (i === zo._curr) {
         const zO = zo.zoom;
-        zo._canvas.setZoom(1 / baseZoom);
+        zo._canvas.setZoom(1 / settings.zoom_base);
         const wRef = img ? img.getScaledWidth() : zo._w;
         const hRef = img ? img.getScaledHeight() : zo._h;
         const topRef = img ? img.top : 0;
         const leftRef = img ? img.left : 0;
-        imgToUpdate.scaleToWidth((wRef * r) / baseZoom);
-        imgToUpdate.scaleToHeight((hRef * r) / baseZoom);
+        imgToUpdate.scaleToWidth((wRef * r) / settings.zoom_base);
+        imgToUpdate.scaleToHeight((hRef * r) / settings.zoom_base);
         imgToUpdate.set("top", topRef - hRef / 3);
         imgToUpdate.set("left", leftRef - wRef / 3);
         zo._canvas.setZoom(zO);
       }
 
       if (i == zo._curr) {
-        img.selectable = false;
+        img.set("selectable", false);
       }
 
       if (i == zo._curr || img === imgToUpdate) {
-        img.visible = true;
+        img.set("visible", true);
       } else {
-        img.visible = false;
+        img.set("selectable", false);
+        img.set("visible", false);
       }
+
+      imgToUpdate.set("selectable", true); // the only one selecetable;
     });
 
-    zo._canvas.renderAll();
+    //zo.zoomToObject(imgToUpdate);
+    zo.render();
   }
 
-  async init() {
+  editEnd() {
     const zo = this;
-    zo._s = 1;
-    zo._n = await zo._images.length();
-    zo._w = settings.width * zo._s;
-    zo._h = settings.height * zo._s;
-    zo._curr = zo._n;
+    zo._canvas.forEachObject((img) => {
+      img.set("visible", true);
+      img.set("selectable", false);
+    });
+    zo.zoomToLargest();
+    zo.lock();
+  }
+
+  build() {
+    const zo = this;
+    zo._w = settings.width;
+    zo._h = settings.height;
+
     zo._el_canvas = el("canvas", {
       class: "zo--canvas",
       style: {
@@ -99,75 +153,14 @@ export class Editor {
         height: `${zo._h}px`,
       },
     });
-    (zo._el_container.style.backgroundColor = settings.background),
-      zo._el_container.appendChild(zo._el_canvas);
+    zo._el_container.style.backgroundColor = settings.background;
+    zo._el_container.appendChild(zo._el_canvas);
     zo._canvas = new fabric.Canvas(zo._el_canvas, {
       preserveObjectStacking: true,
     });
     zo._canvas.setHeight(zo._h);
     zo._canvas.setWidth(zo._w);
-
-    if (zo._n > 0) {
-      const items = await zo._images.getItems();
-      items.reverse();
-      const n = items.length;
-      let i = 0;
-      for (const item of items) {
-        const selectable = i++ < n - 1;
-        await zo.initImage(item.src, {
-          id: item.id,
-          timestamp: item.t,
-          left: item.x,
-          top: item.y,
-          scaleX: item.s,
-          scaleY: item.s,
-          filters: [vignette],
-          selectable: selectable,
-          srcFromAttribute: false,
-        });
-      }
-    }
-
-    zo._canvas.on("object:modified", async (e) => {
-      const id = e.target?.id;
-      const item = await zo._images.getItem(id);
-      item.s = e.target.scaleX;
-      item.h = e.target.height;
-      item.w = e.target.width;
-      item.x = e.target.left;
-      item.y = e.target.top;
-      item.t = Date.now();
-      zo._images.updateItem(id, item);
-    });
-    /*const saved = localStorage.getItem("sc");*/
-
-    zo._locked = true;
-
-    /*debugger;*/
-    /*if (dataDefault) {*/
-    /*console.log("load from file");*/
-    /*zo._data = dataDefault;*/
-    /*} else if (saved) {*/
-    /*console.log("load from localStorage");*/
-    /*zo._data = zo.parse(saved);*/
-    /*} else {*/
-    /*createNew = confirm("Create new ?");*/
-    /*if (createNew) {*/
-    /*await zo.create();*/
-    /*}*/
-    /*}*/
-    /*if (zo._data) {*/
-    /*zo._data.objects.forEach((d, i) => {*/
-    /*d.selectable = zo._locked ? false : i !== 0;*/
-    /*d.visible = true;*/
-    /*});*/
-
-    /*await zo.loadFromJSON(zo._data);*/
-    /*}*/
-    zo._canvas.on("mouse:wheel", zo.handleZoom.bind(zo));
-    zo._canvas.renderAll();
-    zo.initOpacityOnDrag();
-    zo._canvas.setZoom(1 / baseZoom);
+    zo._el_canvas.parentElement.classList.add("zo--editor");
   }
 
   parse(data) {
@@ -178,36 +171,138 @@ export class Editor {
     }
   }
 
+  async updateLimits() {
+    const zo = this;
+    const stat = await zo.getStoreImagesStats();
+    zo._zoom_min_max = {
+      min: zo._canvas.height / (stat.minHeight * stat.maxScale),
+      max: zo._canvas.height / (stat.maxHeight * stat.minScale),
+    };
+    zo.setCenter(stat?.center || settings.center);
+  }
+
+  setZoom(z) {
+    const zo = this;
+    zo._canvas.zoomToPoint({ x: zo.center.x, y: zo.center.y }, z);
+  }
+
   get zoom() {
     const zo = this;
     return zo._canvas.getZoom();
   }
 
-  async animate(recording) {
+  getZoomMinMaxCache() {
     const zo = this;
-    const s = settings;
-    zo._animate = true;
-    const nSteps = s.duration * s.framerate;
-    if (s.reverse) {
-      for (let i = nSteps; i >= 0; i--) {
-        const percent = zo.ease(i / nSteps);
-        console.log(percent);
-        await zo._animate_next(percent, recording);
-      }
-    } else {
-      for (let i = 0; i <= nSteps; i++) {
-        const percent = zo.ease(i / nSteps);
-        await zo._animate_next(percent, recording);
-      }
-    }
+    return zo._zoom_min_max || {};
+  }
 
-    if (recording) {
-      const blob = await videoWriter.complete();
-      zo._el_video = el("video");
-      zo._el_video.setAttribute("src", URL.createObjectURL(blob));
-      document.body.appendChild(zo._el_video);
-      window.open(URL.createObjectURL(blob));
+  async getZoomMin() {
+    const zo = this;
+    const stat = await zo.getStoreImagesStats();
+    return zo._canvas.height / (stat.minHeight * stat.maxScale);
+  }
+  async getZoomMax() {
+    const zo = this;
+    const stat = await zo.getStoreImagesStats();
+    return zo._canvas.height / (stat.maxHeight * stat.minScale);
+  }
+
+  zoomToObject(object) {
+    const zo = this;
+    zo.setZoom(zo._canvas.width / (object.width * object.scaleX));
+  }
+
+  zoomToLargest() {
+    const zo = this;
+    const largest = zo.getObjectLargest();
+    if (largest) {
+      zo.zoomToObject(largest);
     }
+  }
+  zoomToSmallest() {
+    const zo = this;
+    const smallest = zo.getObjectSmallest();
+    if (smallest) {
+      zo.zoomToObject(smallest);
+    }
+  }
+  async record() {
+    return this.play(true);
+  }
+
+  async play(recording) {
+    const zo = this;
+    try {
+      const s = settings;
+      if (zo._animate) {
+        zo._animate = false;
+        return;
+      }
+      const stat = await zo.getStoreImagesStats();
+      if (stat.minTop === -1 || stat.minLeft === -1) {
+        /* if nothing to play, quit */
+        alert(
+          "The animation is not yet configured (apparently).Use Toolbox -> edit."
+        );
+        return;
+      }
+      if (recording) {
+        const ok = confirm("Recording can use a lot of ressources. Continue?");
+        if (!ok) {
+          return;
+        }
+        zo._video_writer = new WebMWriter({
+          quality: 0.95,
+          frameRate: s.framerate,
+          transparent: false,
+        });
+      }
+
+      zo._animate = true;
+      const nSteps = s.duration * s.framerate;
+      const steps = new Set();
+      if (s.reverse) {
+        for (let i = nSteps; i >= 0; i--) {
+          const percent = zo.ease(i / nSteps);
+          steps.add(percent);
+        }
+      } else {
+        for (let i = 0; i <= nSteps; i++) {
+          const percent = zo.ease(i / nSteps);
+          steps.add(percent);
+        }
+      }
+
+      for (const percent of steps) {
+        if (!this._animate) {
+          return;
+        }
+        await zo._animate_next(percent, recording);
+      }
+
+      zo._animate = false;
+      if (recording) {
+        const blob = await zo._video_writer.complete();
+        switch (settings.video_export) {
+          case "download":
+            downloadBlob(blob, "zoomoot.webm");
+            break;
+          case "open":
+            openBlob(blob);
+            break;
+          default:
+            createVideoElement(blob);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      zo._animate = false;
+    }
+  }
+
+  stop() {
+    this._animate = false;
   }
 
   ease(t) {
@@ -216,18 +311,20 @@ export class Editor {
   }
 
   async _animate_next(percent, recording) {
+    const zo = this;
+    const zoomMinMax = zo.getZoomMinMaxCache();
+
     return new Promise((resolve, reject) => {
       try {
-        const zo = this;
         const a = settings;
-        const s = a.zoom_start;
-        const e = a.zoom_end;
+        const s = zoomMinMax.max;
+        const e = zoomMinMax.min;
         const z = zo._linrp({ from: s, to: e, percent });
-        zo._canvas.zoomToPoint(a.center, z);
+        zo._canvas.zoomToPoint(zo.center, z);
 
         if (recording) {
-          console.log(`recording ${Math.floor(percent*100)}`);
-          videoWriter.addFrame(zo._el_canvas);
+          console.log(`recording:${percent}`);
+          zo._video_writer.addFrame(zo._el_canvas);
         }
         setTimeout(resolve, (1 / a.framerate) * 1000);
       } catch (e) {
@@ -238,21 +335,58 @@ export class Editor {
 
   handleZoom(opt) {
     const zo = this;
-    const a = settings;
+    const zmm = zo.getZoomMinMaxCache();
+
+    if (zo._animate) {
+      console.warn("Can't zoom while animate");
+      return;
+    }
     let delta = opt.e.deltaY;
     let zoom = zo.zoom;
     zoom *= 0.999 ** delta;
-    const x = zo._locked ? settings.center.x : opt.e.offsetX;
-    const y = zo._locked ? settings.center.y : opt.e.offsetY;
 
-    if (zoom > a.zoom_start) zoom = a.zoom_start;
-    if (zoom < a.zoom_end) zoom = a.zoom_end;
-
-    zo._canvas.zoomToPoint({ x, y }, zoom);
+    const x = zo.locked ? zo.center.x : opt.e.offsetX;
+    const y = zo.locked ? zo.center.y : opt.e.offsetY;
+    if (zo.locked) {
+      if (zoom > zmm.max) zoom = zmm.max;
+      if (zoom < zmm.min) zoom = zmm.min;
+    }
+    if (zoom > 0 && zoom < Infinity) {
+      // case when no animation configured
+      zo._canvas.zoomToPoint({ x, y }, zoom);
+    }
     opt.e.preventDefault();
     opt.e.stopPropagation();
   }
 
+  initAutoSave() {
+    const zo = this;
+    zo._canvas.on("object:modified", async (e) => {
+      try {
+        if (zo.locked) {
+          console.warn("Can't save in lock mode");
+          return;
+        }
+        const id = e.target?.id;
+        const item = await zo._images.getItem(id);
+        item.s = e.target.scaleX;
+        item.h = e.target.height;
+        item.w = e.target.width;
+        item.x = e.target.left;
+        item.y = e.target.top;
+        item.t = Date.now();
+        await zo._images.updateItem(id, item);
+        await zo.updateLimits();
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  }
+
+  initZoom() {
+    const zo = this;
+    zo._canvas.on("mouse:wheel", zo.handleZoom.bind(zo));
+  }
   initOpacityOnDrag() {
     const zo = this;
     const canvas = zo._canvas;
@@ -291,26 +425,74 @@ export class Editor {
     }
   }
 
-  async create() {
-    // TODO: use Promise.all + reorder afterwards.
+  getObjectById(id) {
     const zo = this;
-    let i = 0;
-    for (const p of config.images) {
-      await zo.initImage(p, {
-        left: 0,
-        top: 0,
-        selectable: i != zo._n - 1,
-        srcFromAttribute: true,
-      });
-      i++;
+    const objects = zo._canvas.getObjects();
+    for (const object of objects) {
+      if (object.id === id) {
+        return object;
+      }
     }
-    zo._canvas.renderAll();
   }
 
-  async initImage(url, opt) {
+  getObjectLargest() {
     const zo = this;
-    const img = await zo.loadImage(url);
-    img.scale(baseZoom);
+    const objects = zo._canvas.getObjects();
+    let largest;
+    for (const object of objects) {
+      if (!largest) {
+        largest = object;
+        continue;
+      }
+      if (object.width * object.scaleX > largest.width * largest.scaleX) {
+        largest = object;
+      }
+    }
+    return largest;
+  }
+  getObjectSmallest() {
+    const zo = this;
+    const objects = zo._canvas.getObjects();
+    let smallest;
+    for (const object of objects) {
+      if (!smallest) {
+        smallest = object;
+        continue;
+      }
+      if (object.width * object.scaleX < smallest.width * smallest.scaleX) {
+        smallest = object;
+      }
+    }
+    return smallest;
+  }
+
+  async removeObject(id) {
+    const zo = this;
+    zo.clearCache();
+    const object = zo.getObjectById(id);
+    if (object) {
+      zo._canvas.remove(object);
+      await zo.updateLimits();
+      zo.zoomToLargest();
+      zo.render();
+    }
+  }
+
+  async getStoreImagesStats() {
+    const zo = this;
+    return zo._images.getStats();
+  }
+
+  async getStoreImagesLength() {
+    const zo = this;
+    return zo._images.length();
+  }
+
+  async addImage(url, opt, skipUpdate) {
+    const zo = this;
+    const img = await zo.createImage(url);
+    zo.clearCache();
+    img.scale(settings.zoom_base);
     img.set(opt);
     img.setControlsVisibility({
       mtr: false,
@@ -319,40 +501,83 @@ export class Editor {
       ml: false,
       mr: false,
     });
+    if (opt?.id) {
+      await zo.removeObject(opt.id);
+    }
     zo._canvas.add(img);
-    if (opt.filters || opt.filters.length) {
+    if (opt.filters && opt.filters?.length > 0) {
       img.applyFilters();
+    }
+    if (opt.zoom) {
+      zo.zoomToObject(img);
+      zo.render();
+    }
+    if (!skipUpdate) {
+      await zo.updateLimits();
     }
   }
 
-  async loadImage(url) {
+  async createImage(url) {
     return new Promise((resolve) => {
       fabric.Image.fromURL(url, resolve);
     });
   }
 
-  /*async loadFromJSON(item) {*/
-  /*const zo = this;*/
-  /*return new Promise((resolve) => {*/
-  /*zo._canvas.loadFromJSON(item, resolve);*/
-  /*});*/
-  /*}*/
+  async getStoreImages() {
+    const zo = this;
+    const items = await zo._images.getItems();
+    items.reverse();
+    return items;
+  }
+
+  async addImagesFromStore() {
+    const zo = this;
+    const n = await zo.getStoreImagesLength();
+    if (n === 0) {
+      console.warn("No images to render");
+      return;
+    }
+    const stat = await zo.getStoreImagesStats();
+    zo.setCenter(stat.center);
+    zo._n = stat.n;
+    if (zo._n > 0) {
+      zo._curr = zo._n;
+      zo._canvas.clear();
+      const items = await zo.getStoreImages();
+      let first = true;
+      for (const item of items) {
+        await zo.addImage(
+          item.src,
+          {
+            id: item.id,
+            timestamp: item.t,
+            left: item.x,
+            top: item.y,
+            scaleX: item.s,
+            scaleY: item.s,
+            filters: first ? null : [vignette],
+            selectable: false,
+            srcFromAttribute: false,
+            zoom: first,
+          },
+          true
+        );
+        first = false;
+      }
+      await zo.updateLimits();
+    }
+  }
 
   toJSON() {
     const zo = this;
     return JSON.stringify(zo._canvas);
   }
-  /*  save() {*/
-  /*const zo = this;*/
-  /*const data = zo.toJSON();*/
-  /*localStorage.setItem("sc", data);*/
-  /*}*/
-  /*clear() {*/
-  /*const ok = confirm("Erase?");*/
-  /*if (ok) {*/
-  /*localStorage.setItem("sc", null);*/
-  /*}*/
-  /*}*/
+
+  clearCache() {
+    const zo = this;
+    delete zo._zoom_min_max;
+  }
+
   _linrp(o) {
     if (Array.isArray(o.from) && Array.isArray(o.to)) {
       const out = [];
@@ -364,4 +589,31 @@ export class Editor {
       return o.from * (1.0 - o.percent) + o.to * o.percent;
     }
   }
+}
+
+/**
+ * Utils
+ */
+function downloadBlob(blob, name) {
+  const a = document.createElement("a");
+  a.style.display = "none";
+  const url = URL.createObjectURL(blob);
+  a.download = name;
+  a.setAttribute("href", url);
+  a.addEventListener("click", () => {
+    setTimeout(() => {
+      URL.revokeObjectURL(url);
+    }, 60 * 1000);
+    a.remove();
+  });
+  document.body.appendChild(a);
+  a.click();
+}
+function openBlob(blob) {
+  window.open(URL.createObjectURL(blob));
+}
+function createVideoElement(blob) {
+  const v = document.createElement("video");
+  v.setAttribute("src", URL.createObjectURL(blob));
+  document.body.appendChild(v);
 }

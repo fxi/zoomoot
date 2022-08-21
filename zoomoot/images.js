@@ -2,10 +2,14 @@ import { Swappable, Plugins } from "@shopify/draggable";
 import { el } from "@fxi/el";
 import localforage from "localforage";
 import { settings } from "./settings.js";
-const storeImages = localforage.createInstance({
-  name: "zo@images_data",
-});
+import { editor } from "./../main.js";
+/*const storeImages = localforage.createInstance({*/
+/*name: "zo@images_data",*/
+/*});*/
 
+const storeImages = localforage.createInstance({
+  name: "zo@images_data_test",
+});
 /**
  * Store Images as blob in local forage and serve them from there when required
  * refs:
@@ -21,8 +25,9 @@ const storeImages = localforage.createInstance({
  */
 
 export class Images {
-  constructor(elContainer) {
+  constructor(elContainer, opt) {
     const zo = this;
+    zo._opt = Object.assign({}, { loaderDefault: null }, opt);
     zo._settings = settings;
     zo._el_container = elContainer;
     zo.init().catch(console.error);
@@ -60,6 +65,7 @@ export class Images {
     const elContainer = document.getElementById(id);
     elContainer.remove();
     await zo._store.removeItem(id);
+    await editor.removeObject(id);
   }
 
   async getItem(id) {
@@ -87,11 +93,11 @@ export class Images {
     return order;
   }
 
-  async getItems() {
+  async getItems(sorted) {
     const zo = this;
     const out = [];
     const ids = zo.getIdOrder();
-    if (!ids.length) {
+    if (!ids.length || !sorted) {
       // No order from ui
       await zo._store.iterate((item) => {
         out.push(item);
@@ -119,13 +125,13 @@ export class Images {
     const zo = this;
     try {
       zo.busyGallery(true, "restoring");
-      zo._images = [];
       const n = await zo._store.length();
-      await zo._store.iterate((image, _, i) => {
-        zo.busyGallery(true, `Restoring image ${i}/${n}`);
-        zo._images.push(image);
-      });
-      zo.addImageList(zo._images);
+      if (n === 0) {
+        await zo.importFromDefault();
+      } else {
+        await zo.importFromStore();
+      }
+      await editor.addImagesFromStore();
     } catch (e) {
       console.error(e);
     } finally {
@@ -161,8 +167,6 @@ export class Images {
         return;
       }
       const imagesList = [];
-      //const names = files.map(file => file.name);
-      //names.sort(natsort);
       const n = files.length;
       let i = 1;
       for (const file of files) {
@@ -178,6 +182,7 @@ export class Images {
       }
       zo.addImageList(imagesList);
       await zo.saveImages(imagesList);
+      await editor.addImagesFromStore();
     } catch (e) {
       console.error(e);
     } finally {
@@ -185,10 +190,31 @@ export class Images {
     }
   }
 
+  async importFromStore() {
+    const zo = this;
+    const images = [];
+    const n = await zo._store.length();
+    await zo._store.iterate((image, _, i) => {
+      zo.busyGallery(true, `Restoring image ${i}/${n}`);
+      images.push(image);
+    });
+    zo.addImageList(images);
+  }
+
+  async importFromDefault() {
+    const zo = this;
+    const ok = confirm("Empty project. Download default project ?");
+    if (ok) {
+      const data = await zo._opt.loaderDefault();
+      zo.addImageList(data);
+      await zo.saveImages(data);
+    }
+  }
+
   async fileToImgObj(file) {
     const zo = this;
     const src = await fileToUrl(file);
-    const dim = zo.getImageSrcSize(src);
+    const dim = await zo.getImageSrcSize(src);
     return {
       src: src,
       id: file.name,
@@ -201,13 +227,137 @@ export class Images {
     };
   }
 
-  getImageSrcSize(url) {
-    const img = new Image();
-    img.src = url;
-    return {
-      width: img.width,
-      height: img.height,
+  async getImageSrcSize(url) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = url;
+      img.onload = () => {
+        resolve({
+          width: img.width,
+          height: img.height,
+        });
+      };
+    });
+  }
+
+  async getStats() {
+    /**
+     *  MaxLeft and MaxTop should be 0
+     *  MinLeft and Mintop should be negative
+     *
+     *                            │
+     *                            │
+     *                            │
+     *                            │
+     *         -12                │
+     *         ┌──────────────────┼─────────────────────────────────────┐
+     *         │                  │                                     │
+     *         │                  │                                     │
+     *         │                  │                                     │
+     *         │                  │                                     │
+     *         │        -6        │                                     │
+     *         │        ┌─────────┼───────────────────────────┐         │
+     *         │        │         │                           │         │
+     *         │        │         │                           │         │
+     *         │        │         │                           │         │
+     * ────────┼────────┼─────────┼───────────────────────────┼─────────┼───────
+     *         │        │         │ 0,0                       │         │
+     *         │        │         │ ┌──────────┐              │         │
+     *         │        │         │ │          │              │         │
+     *         │        │         │ │          │              │         │
+     *         │        │         │ │          │              │         │
+     *         │        │         │ │          │              │         │
+     *         │        │         │ └──────────┘              │         │
+     *         │        │         │                           │         │
+     *         │        │         │                           │         │
+     *         │        │         │                           │         │
+     *         │        │         │                           │         │
+     *         │        │         │                           │         │
+     *         │        └─────────┼───────────────────────────┘         │
+     *         │                  │                                     │
+     *         │                  │                                     │
+     *         │                  │                                     │
+     *         │                  │                                     │
+     *         └──────────────────┼─────────────────────────────────────┘
+     *                            │
+     *                            │
+     */
+    const zo = this;
+    const images = await zo.getItems(false);
+    const stat = {
+      n: images.length,
+      minWidth: 1,
+      maxWidth: 1,
+      minHeight: 1,
+      maxHeight: 1,
+      minScale: 1,
+      maxScale: 1,
+      minTop: 0,
+      maxTop: 0,
+      minLeft: 0,
+      maxLeft: 0,
+      center: { x: settings.center.x, y: settings.center.y },
     };
+    let first = true;
+    let largest;
+    for (const img of images) {
+      if (first) {
+        first = false;
+        stat.maxScale = img.s;
+        stat.minScale = img.s;
+        stat.minHeight = img.h;
+        stat.maxHeight = img.h;
+        stat.minWidth = img.w;
+        stat.maxWidth = img.h;
+        stat.minLeft = img.x;
+        stat.maxLeft = img.x;
+        stat.minTop = img.y;
+        stat.maxTop = img.y;
+        largest = img;
+        continue;
+      }
+      if (img.s > stat.maxScale) {
+        stat.maxScale = img.s;
+        largest = img;
+      }
+      if (img.s < stat.minScale) {
+        stat.minScale = img.s;
+      }
+      if (img.h < stat.minHeight) {
+        stat.minHeight = img.h;
+      }
+      if (img.h > stat.maxHeight) {
+        stat.maxHeight = img.h;
+      }
+      if (img.w < stat.minWidth) {
+        stat.minWidth = img.w;
+      }
+      if (img.w > stat.maxWidth) {
+        stat.maxWidth = img.h;
+      }
+      if (img.x < stat.minLeft) {
+        stat.minLeft = img.x;
+      }
+      if (img.x > stat.maxLeft) {
+        stat.maxLeft = img.x;
+      }
+      if (img.y < stat.minTop) {
+        stat.minTop = img.y;
+      }
+      if (img.y > stat.maxTop) {
+        stat.maxTop = img.y;
+      }
+    }
+    /**
+     * Center
+     */
+    if (largest) {
+      stat.center.x =
+        largest.w - (largest.x + largest.w * largest.s) / largest.s;
+      stat.center.y =
+        largest.h - (largest.y + largest.h * largest.s) / largest.s;
+    }
+    return stat;
   }
 
   buildImagePreview(imgObj, width, height) {
@@ -281,6 +431,17 @@ export class Images {
         console.log(items);
       });
     }
+  }
+
+  async export() {
+    const out = [];
+    await storeImages.iterate((item) => {
+      out.push(item);
+    });
+    console.log(out);
+  }
+  import(data) {
+    console.log(data);
   }
 }
 
