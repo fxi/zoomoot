@@ -1,0 +1,118 @@
+:root {
+  --zo-color: #eee;
+  --zo-border: #eee;
+  --zo-background: #333;
+  --zo-font-family: Roboto Mono, Source Code Pro, Menlo, Courier, monospace;
+}
+
+.zo--container {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  color: var(--zo-color);
+  background-color: var(--zo-background);
+  font-family: var(--zo-font-family);
+}
+
+.zo--column {
+  width: 50%;
+  min-width: 250px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: wrap;
+}
+
+.zo--panel {
+  min-height: 250px;
+  min-width: 250px;
+  width: 100%;
+  height: 50%;
+  flex-grow: 1;
+  outline: 1px solid #d9dadb;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.zo--editor:empty::before {
+  content: "Select image";
+}
+.zo--editor {
+  position: relative;
+  background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAANJwAADScBQwZj3AAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAAmSURBVBiVY2TAAp49e/YfXYwJm0JsYAAVMmJzuJSUFCPtraa+QgDLYwfEbRLGHgAAAABJRU5ErkJggg==);
+  background-size: 10px 10px;
+  background-position: 0 0, 5px 0, 5px -5px, 0px 5px;
+  outline: 1px dashed var(--zo-border);
+  background-color: #9e9e9e;
+}
+
+.zo--config-editor-container {
+  padding: 40px;
+}
+
+/**
+* Images 
+*/
+.zo--images-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.zo--images-gallery {
+  position: relative;
+  overflow: auto;
+  width: 100%;
+  padding: 20px;
+  flex-grow: 1;
+  user-select: none;
+
+}
+.zo--image-container {
+  margin: 3px;
+  height: 100px;
+  width: 100px;
+  display: inline-block;
+}
+.zo--images-gallery:empty::before {
+  content: "Drop images";
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+}
+.zo--images-gallery.busy::before {
+  content: attr(data-message);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  top: 0;
+  left: 0;
+  backdrop-filter: blur(10px);
+  z-index: 1;
+  pointer-events: none;
+}
+/**
+* buttons 
+*/
+.zo--btn {
+  border-radius: 50%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: var(--zo-background);
+  border: 1px solid var(--zo-border);
+  color: var(--zo-color);
+}
+.zo--btn-circle-small {
+  position: absolute;
+  width: 20px;
+  height: 20px;
+}
