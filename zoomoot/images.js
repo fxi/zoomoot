@@ -81,6 +81,7 @@ export class Images {
       Object.assign(item, {}, obj);
       await zo._store.setItem(id, item);
     }
+    console.log("Saved item id");
   }
 
   getIdOrder() {
@@ -115,10 +116,7 @@ export class Images {
   build() {
     const zo = this;
     zo._el_gallery = el("div", { class: "zo--images-gallery" });
-    zo._el_images = el("div", { class: "zo--images-container" }, [
-      zo._el_gallery,
-    ]);
-    zo._el_container.appendChild(zo._el_images);
+    zo._el_container.appendChild(zo._el_gallery);
   }
 
   async initImages() {
@@ -220,8 +218,8 @@ export class Images {
       id: file.name,
       w: dim.width,
       h: dim.height,
-      x: -1,
-      y: -1,
+      x: settings.width / 2 - dim.width / 2,
+      y: settings.height / 2 - dim.height / 2,
       s: 1,
       t: null, // timestamp last modif
     };
@@ -296,7 +294,8 @@ export class Images {
       maxTop: 0,
       minLeft: 0,
       maxLeft: 0,
-      center: { x: settings.center.x, y: settings.center.y },
+      center: { x: 0, y: 0 },
+      nMissingConf: images.length - 1,
     };
     let first = true;
     let largest;
@@ -315,6 +314,12 @@ export class Images {
         stat.maxTop = img.y;
         largest = img;
         continue;
+      }
+      if (img.t > 0) {
+        /*
+         * Check for timestamp
+         */
+        stat.nMissingConf--;
       }
       if (img.s > stat.maxScale) {
         stat.maxScale = img.s;
@@ -348,14 +353,22 @@ export class Images {
         stat.maxTop = img.y;
       }
     }
+
     /**
      * Center
+     * Anim center is the largest item's center
      */
     if (largest) {
+      // works more or less
+
       stat.center.x =
-        largest.w - (largest.x + largest.w * largest.s) / largest.s;
+        settings.width -
+        settings.offset.x -
+        (largest.x + largest.w * largest.s) / largest.s;
       stat.center.y =
-        largest.h - (largest.y + largest.h * largest.s) / largest.s;
+        settings.height +
+        settings.offset.y -
+        (largest.y + largest.h * largest.s) / largest.s;
     }
     return stat;
   }
@@ -383,6 +396,12 @@ export class Images {
       style: {
         display: "block",
       },
+      on: [
+        "click",
+        () => {
+          editor.zoomToObjectId(imgObj.id);
+        },
+      ],
     });
     const elButton = el(
       "button",

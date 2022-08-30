@@ -24,24 +24,104 @@ export class Editor {
   }
   async init() {
     const zo = this;
-    zo.lock();
     zo.build();
     zo.initAutoSave();
     zo.initOpacityOnDrag();
     zo.initZoom();
+    zo.lock();
     zo.render();
   }
-
-  setCenter(center) {
-    this._center = center || settings.center;
+  initZoom() {
+    const zo = this;
+    zo._canvas.on("mouse:wheel", zo.handleZoom.bind(zo));
   }
-  get center() {
-    return this._center || settings.center;
+  initMousePointerCoord() {
+    const zo = this;
+    zo._canvas.on("mouse:move", (options) => {
+      const p = canvas.getPointer(options.e);
+      console.log({ x: Math.round(p.x), y: Math.round(p.y) });
+    });
+  }
+  initOpacityOnDrag() {
+    const zo = this;
+    const canvas = zo._canvas;
+
+    canvas.on({
+      "object:moving": hideOther,
+      "object:scaling": hideOther,
+      "object:modified": () => {
+        canvas.forEachObject((o) => {
+          o.opacity = 1;
+        });
+      },
+    });
+    function hideOther(e) {
+      let found = false;
+      canvas.forEachObject((o) => {
+        if (!found) {
+          if (o === e.target) {
+            // curent object
+            o.opacity = 1;
+            found = true;
+          } else {
+            // parent
+            o.opacity = 0.5;
+          }
+        } else {
+          // nested
+          o.opacity = 0.5;
+          switch (e.transform.action) {
+            case "scale":
+              break;
+            case "drag":
+              break;
+          }
+        }
+      });
+    }
+  }
+  initAutoSave() {
+    const zo = this;
+    zo._canvas.on("object:modified", async (e) => {
+      try {
+        if (zo.locked) {
+          console.warn("Can't save in lock mode");
+          return;
+        }
+        const id = e.target?.id;
+        const item = await zo._images.getItem(id);
+        item.s = e.target.scaleX;
+        item.h = e.target.height;
+        item.w = e.target.width;
+        item.x = e.target.left;
+        item.y = e.target.top;
+        item.t = Date.now();
+        await zo._images.updateItem(id, item);
+        await zo.updateLimits();
+      } catch (e) {
+        console.error(e);
+      }
+    });
+  }
+
+  get width() {
+    return this._canvas.width;
+  }
+  get height() {
+    return this._canvas.height;
+  }
+  setCenterZoomAnim(center) {
+    this._center_zoom_anim = center || settings.center_zoom_anim;
+  }
+  get centerZoomAnim() {
+    const zo = this;
+    const center = zo._center_zoom_anim || settings.center_zoom_anim;
+    return center;
   }
 
   render() {
     const zo = this;
-    zo._canvas.renderAll();
+    zo._canvas.discardActiveObject().renderAll();
   }
 
   lock() {
@@ -60,6 +140,7 @@ export class Editor {
   }
   editNext() {
     const zo = this;
+    zo.unlock();
     zo._curr--;
     if (zo._curr < 0) {
       to._curr = zo._n;
@@ -101,33 +182,28 @@ export class Editor {
     zo._canvas.forEachObject((img, i) => {
       if (i === zo._curr) {
         const zO = zo.zoom;
-        zo._canvas.setZoom(1 / settings.zoom_base);
+        zo._canvas.setZoom(1);
         const wRef = img ? img.getScaledWidth() : zo._w;
         const hRef = img ? img.getScaledHeight() : zo._h;
         const topRef = img ? img.top : 0;
         const leftRef = img ? img.left : 0;
-        imgToUpdate.scaleToWidth((wRef * r) / settings.zoom_base);
-        imgToUpdate.scaleToHeight((hRef * r) / settings.zoom_base);
+        imgToUpdate.scaleToWidth(wRef * r);
+        imgToUpdate.scaleToHeight(hRef * r);
         imgToUpdate.set("top", topRef - hRef / 3);
         imgToUpdate.set("left", leftRef - wRef / 3);
         zo._canvas.setZoom(zO);
       }
 
+      img.set("selectable", false);
+      img.set("visible", false);
+
       if (i == zo._curr) {
-        img.set("selectable", false);
-      }
-
-      if (i == zo._curr || img === imgToUpdate) {
         img.set("visible", true);
-      } else {
-        img.set("selectable", false);
-        img.set("visible", false);
       }
-
-      imgToUpdate.set("selectable", true); // the only one selecetable;
     });
 
-    //zo.zoomToObject(imgToUpdate);
+    imgToUpdate.set("selectable", true);
+    imgToUpdate.set("visible", true);
     zo.render();
   }
 
@@ -137,8 +213,8 @@ export class Editor {
       img.set("visible", true);
       img.set("selectable", false);
     });
-    zo.zoomToLargest();
     zo.lock();
+    zo.zoomToOrigin();
   }
 
   build() {
@@ -162,7 +238,6 @@ export class Editor {
     zo._canvas.setWidth(zo._w);
     zo._el_canvas.parentElement.classList.add("zo--editor");
   }
-
   parse(data) {
     try {
       return JSON.parse(data);
@@ -172,18 +247,22 @@ export class Editor {
   }
 
   async updateLimits() {
+    console.log("update limits");
     const zo = this;
     const stat = await zo.getStoreImagesStats();
     zo._zoom_min_max = {
-      min: zo._canvas.height / (stat.minHeight * stat.maxScale),
-      max: zo._canvas.height / (stat.maxHeight * stat.minScale),
+      min: zo._canvas.height / (stat.maxHeight * stat.maxScale),
+      max: zo._canvas.width / (stat.minWidth * stat.minScale),
     };
-    zo.setCenter(stat?.center || settings.center);
+    zo.setCenterZoomAnim(stat?.center);
   }
 
   setZoom(z) {
     const zo = this;
-    zo._canvas.zoomToPoint({ x: zo.center.x, y: zo.center.y }, z);
+    zo._canvas.zoomToPoint(
+      { x: zo.centerZoomAnim.x, y: zo.centerZoomAnim.y },
+      z
+    );
   }
 
   get zoom() {
@@ -207,9 +286,57 @@ export class Editor {
     return zo._canvas.height / (stat.maxHeight * stat.minScale);
   }
 
-  zoomToObject(object) {
+  zoomToOrigin() {
     const zo = this;
-    zo.setZoom(zo._canvas.width / (object.width * object.scaleX));
+    zo._canvas.absolutePan({ x: 0, y: 0 });
+    zo._canvas.setZoom(1);
+  }
+
+  panToObjectId(id) {
+    const zo = this;
+    zo.panToObject(zo.getObjectById(id));
+  }
+
+  panToObject(object, zoom) {
+    /**
+     * Pan the canvas to the selected object
+     */
+    const zo = this;
+    const canvas = zo._canvas;
+    const z = zoom || zo._canvas.getZoom();
+    const wC = canvas.getWidth();
+    const hC = canvas.getHeight();
+    const hO = object.getScaledHeight();
+    const wO = object.getScaledWidth();
+    const pos = {
+      x: object.aCoords.tl.x,
+      y: object.aCoords.tl.y,
+    };
+
+    const panX = (wC / z / 2 - pos.x - wO / 2) * z;
+    const panY = (hC / z / 2 - pos.y - hO / 2) * z;
+    canvas.setViewportTransform([z, 0, 0, z, panX, panY]);
+    const center = {
+      x: panX,
+      y: panY,
+    };
+    console.log(center);
+  }
+
+  zoomToObject(object, zoom) {
+    const zo = this;
+    const z = zoom || zo._canvas.width / object.getScaledWidth();
+    zo.panToObject(object, z);
+    const c = {
+      x: zo._canvas.width / 2,
+      y: zo._canvas.height / 2,
+    };
+    zo._canvas.zoomToPoint(c, z);
+  }
+  zoomToObjectId(id, zoom) {
+    const zo = this;
+    const object = zo.getObjectById(id);
+    zo.zoomToObject(object, zoom);
   }
 
   zoomToLargest() {
@@ -239,10 +366,10 @@ export class Editor {
         return;
       }
       const stat = await zo.getStoreImagesStats();
-      if (stat.minTop === -1 || stat.minLeft === -1) {
+      if (stat.nMissingConf > 0) {
         /* if nothing to play, quit */
         alert(
-          "The animation is not yet configured (apparently).Use Toolbox -> edit."
+          "The animation is not fully configured (apparently).Use Toolbox -> edit."
         );
         return;
       }
@@ -313,20 +440,20 @@ export class Editor {
   async _animate_next(percent, recording) {
     const zo = this;
     const zoomMinMax = zo.getZoomMinMaxCache();
-
     return new Promise((resolve, reject) => {
       try {
         const a = settings;
         const s = zoomMinMax.max;
         const e = zoomMinMax.min;
         const z = zo._linrp({ from: s, to: e, percent });
-        zo._canvas.zoomToPoint(zo.center, z);
+
+        zo._canvas.zoomToPoint(zo.centerZoomAnim, z);
 
         if (recording) {
           console.log(`recording:${percent}`);
           zo._video_writer.addFrame(zo._el_canvas);
         }
-        setTimeout(resolve, (1 / a.framerate) * 1000);
+        setTimeout(resolve, recording ? 0 : (1 / a.framerate) * 1000);
       } catch (e) {
         reject(e);
       }
@@ -338,15 +465,15 @@ export class Editor {
     const zmm = zo.getZoomMinMaxCache();
 
     if (zo._animate) {
-      console.warn("Can't zoom while animate");
-      return;
+      // stop animation
+      zo._animate = false;
     }
     let delta = opt.e.deltaY;
     let zoom = zo.zoom;
     zoom *= 0.999 ** delta;
 
-    const x = zo.locked ? zo.center.x : opt.e.offsetX;
-    const y = zo.locked ? zo.center.y : opt.e.offsetY;
+    const x = zo.locked ? zo.centerZoomAnim.x : opt.e.offsetX;
+    const y = zo.locked ? zo.centerZoomAnim.y : opt.e.offsetY;
     if (zo.locked) {
       if (zoom > zmm.max) zoom = zmm.max;
       if (zoom < zmm.min) zoom = zmm.min;
@@ -359,69 +486,24 @@ export class Editor {
     opt.e.stopPropagation();
   }
 
-  initAutoSave() {
+  async reset() {
     const zo = this;
-    zo._canvas.on("object:modified", async (e) => {
-      try {
-        if (zo.locked) {
-          console.warn("Can't save in lock mode");
-          return;
-        }
-        const id = e.target?.id;
-        const item = await zo._images.getItem(id);
-        item.s = e.target.scaleX;
-        item.h = e.target.height;
-        item.w = e.target.width;
-        item.x = e.target.left;
-        item.y = e.target.top;
-        item.t = Date.now();
-        await zo._images.updateItem(id, item);
-        await zo.updateLimits();
-      } catch (e) {
-        console.error(e);
-      }
-    });
-  }
+    try {
+      const images = await zo.getStoreImages();
 
-  initZoom() {
-    const zo = this;
-    zo._canvas.on("mouse:wheel", zo.handleZoom.bind(zo));
-  }
-  initOpacityOnDrag() {
-    const zo = this;
-    const canvas = zo._canvas;
-    canvas.on({
-      "object:moving": hideOther,
-      "object:scaling": hideOther,
-      "object:modified": () => {
-        canvas.forEachObject((o) => {
-          o.opacity = 1;
-        });
-      },
-    });
-    function hideOther(e) {
-      let found = false;
-      canvas.forEachObject((o) => {
-        if (!found) {
-          if (o === e.target) {
-            // curent object
-            o.opacity = 1;
-            found = true;
-          } else {
-            // parent
-            o.opacity = 0.5;
-          }
-        } else {
-          // nested
-          o.opacity = 0.5;
-          switch (e.transform.action) {
-            case "scale":
-              break;
-            case "drag":
-              break;
-          }
-        }
-      });
+      for (const item of images) {
+        item.s = 1;
+        item.x = settings.width / 2 - item.w / 2;
+        item.y = settings.height / 2 - item.h / 2;
+        item.t = null;
+        await zo._images.updateItem(item.id, item);
+      }
+      zo.clear();
+      await zo.addImagesFromStore();
+      await zo.updateLimits();
+      zo.zoom(1);
+    } catch (e) {
+      console.error;
     }
   }
 
@@ -433,6 +515,16 @@ export class Editor {
         return object;
       }
     }
+  }
+
+  toggleBorders() {
+    const zo = this;
+    const objects = zo._canvas.getObjects();
+    const enabled = zo._show_border;
+    for (const object of objects) {
+      object.set("strokeWidth", enabled ? 0 : 5);
+    }
+    zo._show_border = true;
   }
 
   getObjectLargest() {
@@ -492,7 +584,7 @@ export class Editor {
     const zo = this;
     const img = await zo.createImage(url);
     zo.clearCache();
-    img.scale(settings.zoom_base);
+    img.scale(1);
     img.set(opt);
     img.setControlsVisibility({
       mtr: false,
@@ -507,10 +599,6 @@ export class Editor {
     zo._canvas.add(img);
     if (opt.filters && opt.filters?.length > 0) {
       img.applyFilters();
-    }
-    if (opt.zoom) {
-      zo.zoomToObject(img);
-      zo.render();
     }
     if (!skipUpdate) {
       await zo.updateLimits();
@@ -530,6 +618,11 @@ export class Editor {
     return items;
   }
 
+  clear() {
+    const zo = this;
+    zo._canvas.clear();
+  }
+
   async addImagesFromStore() {
     const zo = this;
     const n = await zo.getStoreImagesLength();
@@ -538,11 +631,11 @@ export class Editor {
       return;
     }
     const stat = await zo.getStoreImagesStats();
-    zo.setCenter(stat.center);
+    zo.zoomToOrigin();
     zo._n = stat.n;
     if (zo._n > 0) {
       zo._curr = zo._n;
-      zo._canvas.clear();
+      zo.clear();
       const items = await zo.getStoreImages();
       let first = true;
       for (const item of items) {
@@ -555,6 +648,8 @@ export class Editor {
             top: item.y,
             scaleX: item.s,
             scaleY: item.s,
+            originY: "top",
+            originX: "left",
             filters: first ? null : [vignette],
             selectable: false,
             srcFromAttribute: false,

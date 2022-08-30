@@ -5,14 +5,14 @@ const settings = {
   title: "hello",
   description: "Amimation by zoomoot",
   background: "#000",
-  width: 1024,
-  height: 1024,
-  center: { y: 300, x: 512 },
+  width: 1280,
+  height: 720,
+  center_zoom_anim: { y: 720 / 2, x: 1280 / 2 },
+  offset: { x: 130, y: 300 },
   ratio: 2.9296875, // 3000 / 1024
   framerate: 60,
   duration: 120,
   reverse: false,
-  zoom_base: 1,
   video_export: "download",
 };
 
@@ -27,10 +27,10 @@ const tabs = folder_toolbox.addTab({
   pages: [{ title: "Animate" }, { title: "Edit" }],
 });
 
-tabs.pages[0].addInput(settings, "title");
-tabs.pages[0].addInput(settings, "description");
-tabs.pages[0].addInput(settings, "width");
-tabs.pages[0].addInput(settings, "height");
+//tabs.pages[0].addInput(settings, "title");
+//tabs.pages[0].addInput(settings, "description");
+//tabs.pages[0].addInput(settings, "width");
+//tabs.pages[0].addInput(settings, "height");
 tabs.pages[0].addInput(settings, "framerate");
 tabs.pages[0].addInput(settings, "duration");
 tabs.pages[0].addInput(settings, "reverse");
@@ -62,24 +62,7 @@ const btnRecord = tabs.pages[0].addButton({
 btnRecord.on("click", () => {
   editor.record();
 });
-/**
- * Edit first step
- */
-/*const btnEditFirst = tabs.pages[1].addButton({*/
-  /*title: "Edit first",*/
-/*});*/
-/*btnEditFirst.on("click", () => {*/
-  /*editor.editFirst();*/
-/*});*/
-/**
- * Edit Previous step
- */
-/*const btnEditPrevious = tabs.pages[1].addButton({*/
-  /*title: "Edit previous",*/
-/*});*/
-/*btnEditPrevious.on("click", () => {*/
-  /*editor.editPrevious();*/
-/*});*/
+
 /**
  * Edit next step
  */
@@ -90,16 +73,7 @@ btnEditNext.on("click", () => {
   editor.editNext();
 });
 /**
- * Edit last step
- */
-/*const btnEditLast = tabs.pages[1].addButton({*/
-  /*title: "Edit last",*/
-/*});*/
-/*btnEditLast.on("click", () => {*/
-  /*editor.editLast();*/
-/*});*/
-/**
- * Edit last step
+ * End edition
  */
 const btnEditEnd = tabs.pages[1].addButton({
   title: "Edit end",
@@ -107,4 +81,14 @@ const btnEditEnd = tabs.pages[1].addButton({
 btnEditEnd.on("click", () => {
   editor.editEnd();
 });
+/**
+ * End edition
+ */
+const btnReset = tabs.pages[1].addButton({
+  title: "Reset",
+});
+btnReset.on("click", () => {
+  editor.reset();
+});
+
 export { pane, settings };
