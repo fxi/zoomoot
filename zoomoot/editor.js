@@ -1,4 +1,3 @@
-//import loadMP4Module, { isWebCodecsSupported } from "mp4-wasm";
 import loadMP4Module, {
   isWebCodecsSupported,
 } from "https://unpkg.com/mp4-wasm@1.0.6";
