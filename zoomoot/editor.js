@@ -1,4 +1,7 @@
-import WebMWriter from "webm-writer";
+//import loadMP4Module, { isWebCodecsSupported } from "mp4-wasm";
+import loadMP4Module, {
+  isWebCodecsSupported,
+} from "https://unpkg.com/mp4-wasm@1.0.6";
 import { el } from "@fxi/el";
 import { settings } from "./settings.js";
 import { images } from "./../main.js";
@@ -26,6 +29,7 @@ export class Editor {
   async init() {
     const zo = this;
     zo.build();
+    zo.initBinds();
     zo.initAutoSave();
     //zo.initInactiveTabTrick();
     zo.initWakeLock();
@@ -34,29 +38,6 @@ export class Editor {
     zo.lock();
     zo.render();
   }
-  /**
-   * Trick to play audio to avoid animation slow down when tab
-   * is inactive.
-   * - makes click sound
-   * - does not solve canvas rendering issue
-   */
-  /*  initInactiveTabTrick() {*/
-  /*const zo = this;*/
-  /*zo._audio_ctx = new (window.AudioContext || window.webkitAudioContext)();*/
-  /*const oscillator = zo._audio_ctx.createOscillator();*/
-  /*oscillator.type = "sin";*/
-  /*oscillator.frequency.setValueAtTime(15, zo._audio_ctx.currentTime);*/
-  /*zo._osc = oscillator;*/
-  /*zo._osc.start();*/
-  /*}*/
-  /*animIfInactiveTab(enable) {*/
-  /*const zo = this;*/
-  /*if (enable) {*/
-  /*zo._osc.connect(zo._audio_ctx.destination);*/
-  /*} else {*/
-  /*zo._osc.disconnect(zo._audio_ctx.destination);*/
-  /*}*/
-  /*}*/
   initWakeLock() {
     const zo = this;
     document.addEventListener("visibilitychange", async () => {
@@ -71,45 +52,20 @@ export class Editor {
     zo.wakeLockEnable().catch(console.warn);
   }
 
-  async wakeLockEnable() {
+  initBinds() {
     const zo = this;
-    const available = "wakeLock" in navigator;
-    if (zo._wake_lock) {
-      to.wakeLockDisable();
-    }
-    if (!available) {
-      alert(
-        "WakeLock API not available : recording can be interrupted by sleep mode. Use Chromium based browser to avoid that."
-      );
-    } else {
-      zo._wake_lock = await navigator.wakeLock.request("screen");
-      console.log("Wake Lock created");
-      zo._wake_lock.addEventListener("release", () => {
-        console.log("Wake Lock released");
-        delete zo._wake_lock;
-      });
-    }
-  }
-
-  wakeLockDisable() {
-    const zo = this;
-    if (zo._wake_lock) {
-      zo._wake_lock.release();
-      delete zo._wake_lock;
-    }
+    /*
+     * binds
+     * -> used in callbacks
+     */
+    zo.handleZoom = zo.handleZoom.bind(zo);
   }
 
   initZoom() {
     const zo = this;
-    zo._canvas.on("mouse:wheel", zo.handleZoom.bind(zo));
+    zo._canvas.on("mouse:wheel", zo.handleZoom);
   }
-  initMousePointerCoord() {
-    const zo = this;
-    zo._canvas.on("mouse:move", (options) => {
-      const p = canvas.getPointer(options.e);
-      console.log({ x: Math.round(p.x), y: Math.round(p.y) });
-    });
-  }
+
   initOpacityOnDrag() {
     const zo = this;
     const canvas = zo._canvas;
@@ -172,14 +128,42 @@ export class Editor {
     });
   }
 
+  async wakeLockEnable() {
+    const zo = this;
+    const available = "wakeLock" in navigator;
+    if (zo._wake_lock) {
+      to.wakeLockDisable();
+    }
+    if (!available) {
+      alert(
+        "WakeLock API not available : recording can be interrupted by sleep mode. Use Chromium based browser to avoid that."
+      );
+    } else {
+      zo._wake_lock = await navigator.wakeLock.request("screen");
+      zo._wake_lock.addEventListener("release", () => {
+        delete zo._wake_lock;
+      });
+    }
+  }
+
+  wakeLockDisable() {
+    const zo = this;
+    if (zo._wake_lock) {
+      zo._wake_lock.release();
+      delete zo._wake_lock;
+    }
+  }
+
   setTitle(title) {
     document.title = title || settings.pageTitle;
   }
-  setProgress(percent, recording) {
+  setProgress(percent) {
     const zo = this;
     const msg =
       percent > 0
-        ? `${recording ? "🔴" : "▶️"}${Math.ceil(percent * 100 * 100) / 100}`
+        ? `${zo._recording ? "🔴" : "▶️"}${
+            Math.ceil(percent * 100 * 100) / 100
+          }`
         : null;
     zo.setTitle(msg);
   }
@@ -223,7 +207,7 @@ export class Editor {
     zo.unlock();
     zo._curr--;
     if (zo._curr < 0) {
-      to._curr = zo._n;
+      zo._curr = zo._n - 1;
     }
     zo.editStep(zo._curr);
   }
@@ -243,7 +227,7 @@ export class Editor {
   editStep(n) {
     const zo = this;
     const r = settings.ratio;
-    if (zo._animate) {
+    if (zo._animate || zo._recording) {
       alert("Editing is not possible during animation");
     }
     zo.unlock();
@@ -253,25 +237,47 @@ export class Editor {
       zo._curr = n;
     }
 
+    /**
+     * Set first image bellow the current one as editable
+     */
     zo._canvas.forEachObject((img, i) => {
       if (i === zo._curr - 1) {
         imgToUpdate = img;
       }
     });
 
+    if (!imgToUpdate) {
+      return;
+    }
+
+    /**
+     * Apply default settings :
+     * - Hide all, except the ref image and the image to edit
+     * - Only the image to edit can be selected, rescaled and moved
+     */
     zo._canvas.forEachObject((img, i) => {
       if (i === zo._curr) {
-        const zO = zo.zoom;
-        zo._canvas.setZoom(1);
-        const wRef = img ? img.getScaledWidth() : zo._w;
-        const hRef = img ? img.getScaledHeight() : zo._h;
-        const topRef = img ? img.top : 0;
-        const leftRef = img ? img.left : 0;
-        imgToUpdate.scaleToWidth(wRef * r);
-        imgToUpdate.scaleToHeight(hRef * r);
-        imgToUpdate.set("top", topRef - hRef / 3);
-        imgToUpdate.set("left", leftRef - wRef / 3);
-        zo._canvas.setZoom(zO);
+        /**
+         * Automatically
+         * - set default scale based on ratio * reference image width
+         * - set default position, near reference image
+         * Skip if timestamp already exist.
+         */
+        if (imgToUpdate.timestamp) {
+          zo.zoomToObject(imgToUpdate);
+        } else {
+          const zO = zo.zoom;
+          zo._canvas.setZoom(1);
+          const wRef = img ? img.getScaledWidth() : zo._w;
+          const hRef = img ? img.getScaledHeight() : zo._h;
+          const topRef = img ? img.top : 0;
+          const leftRef = img ? img.left : 0;
+          imgToUpdate.scaleToWidth(wRef * r);
+          imgToUpdate.scaleToHeight(hRef * r);
+          imgToUpdate.set("top", topRef - hRef / 3);
+          imgToUpdate.set("left", leftRef - wRef / 3);
+          zo._canvas.setZoom(zO);
+        }
       }
 
       img.set("selectable", false);
@@ -331,7 +337,7 @@ export class Editor {
     const zo = this;
     const stat = await zo.getStoreImagesStats();
     zo._zoom_min_max = {
-      min: zo._canvas.height / (stat.maxHeight * stat.maxScale),
+      min: zo._canvas.width / (stat.maxWidth * stat.maxScale),
       max: zo._canvas.width / (stat.minWidth * stat.minScale),
     };
     zo.setCenterZoomAnim(stat?.center);
@@ -396,11 +402,10 @@ export class Editor {
     const panX = (wC / z / 2 - pos.x - wO / 2) * z;
     const panY = (hC / z / 2 - pos.y - hO / 2) * z;
     canvas.setViewportTransform([z, 0, 0, z, panX, panY]);
-    const center = {
+    return {
       x: panX,
       y: panY,
     };
-    console.log(center);
   }
 
   zoomToObject(object, zoom) {
@@ -426,6 +431,7 @@ export class Editor {
       zo.zoomToObject(largest);
     }
   }
+
   zoomToSmallest() {
     const zo = this;
     const smallest = zo.getObjectSmallest();
@@ -433,18 +439,30 @@ export class Editor {
       zo.zoomToObject(smallest);
     }
   }
+
   async record() {
-    return this.play(true);
+    const zo = this;
+    if (isWebCodecsSupported()) {
+      alert("WebCodeds not supported in this browser");
+      return;
+    }
+    return zo.play(true);
   }
 
   async play(recording) {
     const zo = this;
     try {
       const s = settings;
+      const steps = [];
       if (zo._animate) {
-        zo._animate = false;
+        zo.stop();
         return;
       }
+      zo.setProgress(0);
+      zo._animate = true;
+      zo._recording = !!recording;
+      zo._mp4_encoder = null;
+      zo._animate_steps_n = s.duration * s.framerate;
       const stat = await zo.getStoreImagesStats();
       if (stat.nMissingConf > 0) {
         /* if nothing to play, quit */
@@ -453,77 +471,89 @@ export class Editor {
         );
         return;
       }
-      if (recording) {
+      if (zo._recording) {
         const ok = confirm("Recording can use a lot of ressources. Continue?");
         if (!ok) {
           return;
         }
-        zo._video_writer = new WebMWriter({
-          quality: 0.95,
-          frameRate: s.framerate,
-          transparent: false,
+
+        const MP4 = await loadMP4Module();
+        zo._mp4_encoder = MP4.createWebCodecsEncoder({
+          width: s.width,
+          height: s.height,
+          fps: s.framerate,
+          bitrate: s.bitrate,
         });
       }
 
-      zo._animate = true;
-      const nSteps = s.duration * s.framerate;
-      const steps = new Set();
       /**
        * Uses big.js to handle very large significant numbers
        */
       if (s.reverse) {
-        for (let i = nSteps; i >= 0; i--) {
-          const percent = i / nSteps;
+        for (let i = zo._animate_steps_n; i >= 0; i--) {
+          const percent = i / zo._animate_steps_n;
           const zoom = zo._big_step(percent);
-          steps.add({
-            percent,
+          steps.push({
+            percent: 1 - percent,
             zoom,
           });
         }
       } else {
-        for (let i = 0; i <= nSteps; i++) {
-          const percent = i / nSteps;
+        for (let i = 0; i <= zo._animate_steps_n; i++) {
+          const percent = i / zo._animate_steps_n;
           const zoom = zo._big_step(percent);
-          steps.add({
+          steps.push({
             percent,
             zoom,
           });
         }
       }
-      zo.setProgress(0);
-      //zo.animIfInactiveTab(true);
+
       for (const step of steps) {
-        if (!this._animate) {
-          return;
+        if (zo._animate) {
+          await zo._animate_step(step);
+          await zo.nextFrame();
         }
-        await zo._animate_next(step.zoom, recording);
-        zo.setProgress(step.percent);
       }
-      zo._animate = false;
-      if (recording) {
-        const blob = await zo._video_writer.complete();
-        switch (settings.video_export) {
-          case "download":
-            downloadBlob(blob, "zoomoot.webm");
-            break;
-          case "open":
-            openBlob(blob);
-            break;
-          default:
-            createVideoElement(blob);
-        }
+
+      if (zo._recording) {
+        await zo.save();
       }
     } catch (e) {
       console.error(e);
     } finally {
       zo.setProgress(-1);
-      //zo.animIfInactiveTab(false);
-      zo._animate = false;
+      zo.stop();
+      zo._recording = false;
+      delete zo._mp4_encoder;
+    }
+  }
+
+  async save() {
+    const zo = this;
+    if (zo._recording && zo._mp4_encoder) {
+      const data = await zo._mp4_encoder.end();
+      const blob = new Blob([data]);
+      switch (settings.video_export) {
+        case "download":
+          downloadBlob(blob, "zoomoot.mp4");
+          break;
+        case "open":
+          openBlob(blob);
+          break;
+        default:
+          createVideoElement(blob);
+      }
     }
   }
 
   stop() {
+    const zo = this;
     this._animate = false;
+    if (zo._recording) {
+      debugger;
+      zo._mp4_encoder;
+    }
   }
 
   _big_step(percent) {
@@ -536,10 +566,7 @@ export class Editor {
   _big_ease(percent) {
     const p = Big(percent);
     const b = Big(1);
-    return b.minus(p.pow(13));
-    // lol
-    //  return 1 - t * t * t * t * t * t * t * t * t * t * t * t * t;
-    //return 1 - t * Math.pow(t,9);
+    return b.minus(p.pow(settings.ease_power || 2));
   }
 
   _big_zoom(bigP) {
@@ -552,42 +579,44 @@ export class Editor {
   }
 
   _big_linrp(bigFrom, bigTo, bigPercent) {
-    /*  if (Array.isArray(o.from) && Array.isArray(o.to)) {*/
-    /*const out = [];*/
-    /*for (let i = 0; i < Math.min(o.from.length, o.to.length); i++) {*/
-    /*out[i] = o.from[i] * (1.0 - o.percent) + o.to[i] * o.percent;*/
-    /*}*/
-    /*return out;*/
-    /*} else {*/
     const b = Big(1);
     return bigFrom.times(b.minus(bigPercent)).plus(bigTo.times(bigPercent));
-    //}
   }
 
-  async _animate_next(zoom, recording) {
+  async _animate_step(step) {
     const zo = this;
-    const a = settings;
-    return new Promise((resolve, reject) => {
-      try {
-        const z = zoom instanceof Big ? zoom.toPrecision() : zoom;
-        zo._canvas.zoomToPoint(zo.centerZoomAnim, z);
-        if (recording) {
-          zo._video_writer.addFrame(zo._el_canvas);
-        }
-        setTimeout(resolve, recording ? 0 : (1 / a.framerate) * 1000);
-      } catch (e) {
-        reject(e);
-      }
-    });
+    if (!step || !zo._animate) {
+      console.warn("No step to animate :/");
+      return;
+    }
+    const zoom = step.zoom;
+    const z = zoom instanceof Big ? zoom.toPrecision() : zoom;
+    /**
+     * Animation
+     */
+    zo.setZoom(z);
+    zo.setProgress(step.percent);
+    if (zo._recording) {
+      /*
+       * Extract bitmap and add frame;
+       */
+      const bitmap = await createImageBitmap(zo._el_canvas);
+      await zo._mp4_encoder.addFrame(bitmap);
+    }
   }
 
   handleZoom(opt) {
     const zo = this;
     const zmm = zo.getZoomMinMaxCache();
 
+    console.log(zmm);
+    if (zo._recording) {
+      return;
+    }
+
     if (zo._animate) {
       // stop animation
-      zo._animate = false;
+      zo.stop();
     }
     let delta = opt.e.deltaY;
     let zoom = zo.zoom;
@@ -610,6 +639,10 @@ export class Editor {
   async reset() {
     const zo = this;
     try {
+      const ok = confirm("Reset all iamge ? Changes will be lost");
+      if (!ok) {
+        return;
+      }
       const images = await zo.getStoreImages();
 
       for (const item of images) {
@@ -793,11 +826,22 @@ export class Editor {
     const zo = this;
     delete zo._zoom_min_max;
   }
+
+  nextFrame() {
+    return new Promise((resolve) => {
+      if (settings.framerate === 60) {
+        requestAnimationFrame(resolve);
+      } else {
+        setTimeout(resolve, (1 / settings.framerate) * 1000);
+      }
+    });
+  }
 }
 
 /**
  * Utils
  */
+
 function downloadBlob(blob, name) {
   const a = document.createElement("a");
   a.style.display = "none";

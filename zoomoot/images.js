@@ -359,8 +359,11 @@ export class Images {
      * Anim center is the largest item's center
      */
     if (largest) {
-      // works more or less
-
+      /*
+      * TODO: offset should be available 
+      * during the animation. Center could be computed 
+      * at last minutes, withou relaunched getStats
+      */ 
       stat.center.x =
         settings.width -
         settings.offset.x -

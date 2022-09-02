@@ -11,10 +11,13 @@ const settings = {
   center_zoom_anim: { y: 720 / 2, x: 1280 / 2 },
   offset: { x: 130, y: 300 },
   ratio: 2.9296875, // 3000 / 1024
+  //framerate: 60,
   framerate: 60,
+  ease_power : 23 ,
   duration: 120,
   reverse: false,
   video_export: "download",
+  bitrate: 15_000_000
 };
 
 const pane = new Pane();
@@ -33,6 +36,7 @@ const tabs = folder_toolbox.addTab({
 //tabs.pages[0].addInput(settings, "width");
 //tabs.pages[0].addInput(settings, "height");
 tabs.pages[0].addInput(settings, "framerate");
+tabs.pages[0].addInput(settings, "ease_power");
 tabs.pages[0].addInput(settings, "duration");
 tabs.pages[0].addInput(settings, "reverse");
 
