@@ -2,6 +2,7 @@ import { Pane } from "tweakpane";
 import { editor } from "../main.js";
 
 const settings = {
+  pageTitle : "Zoomoot",
   title: "hello",
   description: "Amimation by zoomoot",
   background: "#000",

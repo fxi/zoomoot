@@ -3,6 +3,7 @@ import { el } from "@fxi/el";
 import { settings } from "./settings.js";
 import { images } from "./../main.js";
 import { fabric } from "./filter_vignette";
+import Big from "big.js";
 fabric.Object.NUM_FRACTION_DIGITS = 100;
 fabric.Object.prototype.objectCaching = false;
 
@@ -26,11 +27,78 @@ export class Editor {
     const zo = this;
     zo.build();
     zo.initAutoSave();
+    //zo.initInactiveTabTrick();
+    zo.initWakeLock();
     zo.initOpacityOnDrag();
     zo.initZoom();
     zo.lock();
     zo.render();
   }
+  /**
+   * Trick to play audio to avoid animation slow down when tab
+   * is inactive.
+   * - makes click sound
+   * - does not solve canvas rendering issue
+   */
+  /*  initInactiveTabTrick() {*/
+  /*const zo = this;*/
+  /*zo._audio_ctx = new (window.AudioContext || window.webkitAudioContext)();*/
+  /*const oscillator = zo._audio_ctx.createOscillator();*/
+  /*oscillator.type = "sin";*/
+  /*oscillator.frequency.setValueAtTime(15, zo._audio_ctx.currentTime);*/
+  /*zo._osc = oscillator;*/
+  /*zo._osc.start();*/
+  /*}*/
+  /*animIfInactiveTab(enable) {*/
+  /*const zo = this;*/
+  /*if (enable) {*/
+  /*zo._osc.connect(zo._audio_ctx.destination);*/
+  /*} else {*/
+  /*zo._osc.disconnect(zo._audio_ctx.destination);*/
+  /*}*/
+  /*}*/
+  initWakeLock() {
+    const zo = this;
+    document.addEventListener("visibilitychange", async () => {
+      try {
+        if (document.visibilityState === "visible") {
+          await zo.wakeLockEnable();
+        }
+      } catch (e) {
+        console.warn(e);
+      }
+    });
+    zo.wakeLockEnable().catch(console.warn);
+  }
+
+  async wakeLockEnable() {
+    const zo = this;
+    const available = "wakeLock" in navigator;
+    if (zo._wake_lock) {
+      to.wakeLockDisable();
+    }
+    if (!available) {
+      alert(
+        "WakeLock API not available : recording can be interrupted by sleep mode. Use Chromium based browser to avoid that."
+      );
+    } else {
+      zo._wake_lock = await navigator.wakeLock.request("screen");
+      console.log("Wake Lock created");
+      zo._wake_lock.addEventListener("release", () => {
+        console.log("Wake Lock released");
+        delete zo._wake_lock;
+      });
+    }
+  }
+
+  wakeLockDisable() {
+    const zo = this;
+    if (zo._wake_lock) {
+      zo._wake_lock.release();
+      delete zo._wake_lock;
+    }
+  }
+
   initZoom() {
     const zo = this;
     zo._canvas.on("mouse:wheel", zo.handleZoom.bind(zo));
@@ -102,6 +170,18 @@ export class Editor {
         console.error(e);
       }
     });
+  }
+
+  setTitle(title) {
+    document.title = title || settings.pageTitle;
+  }
+  setProgress(percent, recording) {
+    const zo = this;
+    const msg =
+      percent > 0
+        ? `${recording ? "🔴" : "▶️"}${Math.ceil(percent * 100 * 100) / 100}`
+        : null;
+    zo.setTitle(msg);
   }
 
   get width() {
@@ -388,25 +468,37 @@ export class Editor {
       zo._animate = true;
       const nSteps = s.duration * s.framerate;
       const steps = new Set();
+      /**
+       * Uses big.js to handle very large significant numbers
+       */
       if (s.reverse) {
         for (let i = nSteps; i >= 0; i--) {
-          const percent = zo.ease(i / nSteps);
-          steps.add(percent);
+          const percent = i / nSteps;
+          const zoom = zo._big_step(percent);
+          steps.add({
+            percent,
+            zoom,
+          });
         }
       } else {
         for (let i = 0; i <= nSteps; i++) {
-          const percent = zo.ease(i / nSteps);
-          steps.add(percent);
+          const percent = i / nSteps;
+          const zoom = zo._big_step(percent);
+          steps.add({
+            percent,
+            zoom,
+          });
         }
       }
-
-      for (const percent of steps) {
+      zo.setProgress(0);
+      //zo.animIfInactiveTab(true);
+      for (const step of steps) {
         if (!this._animate) {
           return;
         }
-        await zo._animate_next(percent, recording);
+        await zo._animate_next(step.zoom, recording);
+        zo.setProgress(step.percent);
       }
-
       zo._animate = false;
       if (recording) {
         const blob = await zo._video_writer.complete();
@@ -424,6 +516,8 @@ export class Editor {
     } catch (e) {
       console.error(e);
     } finally {
+      zo.setProgress(-1);
+      //zo.animIfInactiveTab(false);
       zo._animate = false;
     }
   }
@@ -432,25 +526,52 @@ export class Editor {
     this._animate = false;
   }
 
-  ease(t) {
-    // lol
-    return 1 - t * t * t * t * t * t * t * t * t * t * t * t * t;
+  _big_step(percent) {
+    const zo = this;
+    const bigP = zo._big_ease(percent);
+    const bigZ = zo._big_zoom(bigP);
+    return bigZ;
   }
 
-  async _animate_next(percent, recording) {
+  _big_ease(percent) {
+    const p = Big(percent);
+    const b = Big(1);
+    return b.minus(p.pow(13));
+    // lol
+    //  return 1 - t * t * t * t * t * t * t * t * t * t * t * t * t;
+    //return 1 - t * Math.pow(t,9);
+  }
+
+  _big_zoom(bigP) {
     const zo = this;
     const zoomMinMax = zo.getZoomMinMaxCache();
+    const bigFrom = Big(zoomMinMax.max);
+    const bigTo = Big(zoomMinMax.min);
+    const bigZ = zo._big_linrp(bigFrom, bigTo, bigP);
+    return bigZ;
+  }
+
+  _big_linrp(bigFrom, bigTo, bigPercent) {
+    /*  if (Array.isArray(o.from) && Array.isArray(o.to)) {*/
+    /*const out = [];*/
+    /*for (let i = 0; i < Math.min(o.from.length, o.to.length); i++) {*/
+    /*out[i] = o.from[i] * (1.0 - o.percent) + o.to[i] * o.percent;*/
+    /*}*/
+    /*return out;*/
+    /*} else {*/
+    const b = Big(1);
+    return bigFrom.times(b.minus(bigPercent)).plus(bigTo.times(bigPercent));
+    //}
+  }
+
+  async _animate_next(zoom, recording) {
+    const zo = this;
+    const a = settings;
     return new Promise((resolve, reject) => {
       try {
-        const a = settings;
-        const s = zoomMinMax.max;
-        const e = zoomMinMax.min;
-        const z = zo._linrp({ from: s, to: e, percent });
-
+        const z = zoom instanceof Big ? zoom.toPrecision() : zoom;
         zo._canvas.zoomToPoint(zo.centerZoomAnim, z);
-
         if (recording) {
-          console.log(`recording:${percent}`);
           zo._video_writer.addFrame(zo._el_canvas);
         }
         setTimeout(resolve, recording ? 0 : (1 / a.framerate) * 1000);
@@ -671,18 +792,6 @@ export class Editor {
   clearCache() {
     const zo = this;
     delete zo._zoom_min_max;
-  }
-
-  _linrp(o) {
-    if (Array.isArray(o.from) && Array.isArray(o.to)) {
-      const out = [];
-      for (let i = 0; i < Math.min(o.from.length, o.to.length); i++) {
-        out[i] = o.from[i] * (1.0 - o.percent) + o.to[i] * o.percent;
-      }
-      return out;
-    } else {
-      return o.from * (1.0 - o.percent) + o.to * o.percent;
-    }
   }
 }
 
