@@ -12,8 +12,8 @@ fabric.Object.prototype.objectCaching = false;
 //const res = [];
 
 const vignette = new fabric.Image.filters.Vignette({
-  radius: 0.5,
-  smoothness: 0.2,
+  radius: settings.vignette_radius,
+  smoothness: settings.vignette_radius,
 });
 
 export { fabric };
@@ -337,7 +337,7 @@ export class Editor {
     const stat = await zo.getStoreImagesStats();
     zo._zoom_min_max = {
       min: zo._canvas.width / (stat.maxWidth * stat.maxScale),
-      max: zo._canvas.width / (stat.minWidth * stat.minScale),
+      max: (stat.minWidth * stat.minScale) / zo._canvas.width,
     };
     zo.setCenterZoomAnim(stat?.center);
   }
@@ -441,7 +441,7 @@ export class Editor {
 
   async record() {
     const zo = this;
-    if (isWebCodecsSupported()) {
+    if (!isWebCodecsSupported()) {
       alert("WebCodeds not supported in this browser");
       return;
     }
@@ -478,8 +478,8 @@ export class Editor {
 
         const MP4 = await loadMP4Module();
         zo._mp4_encoder = MP4.createWebCodecsEncoder({
-          width: s.width,
-          height: s.height,
+          width: s.width * window.devicePixelRatio,
+          height: s.height * window.devicePixelRatio,
           fps: s.framerate,
           bitrate: s.bitrate,
         });
@@ -550,8 +550,7 @@ export class Editor {
     const zo = this;
     this._animate = false;
     if (zo._recording) {
-      debugger;
-      zo._mp4_encoder;
+      delete zo._mp4_encoder;
     }
   }
 

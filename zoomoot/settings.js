@@ -2,22 +2,25 @@ import { Pane } from "tweakpane";
 import { editor } from "../main.js";
 
 const settings = {
-  pageTitle : "Zoomoot",
+  pageTitle: "Zoomoot",
   title: "hello",
   description: "Amimation by zoomoot",
   background: "#000",
   width: 1280,
   height: 720,
   center_zoom_anim: { y: 720 / 2, x: 1280 / 2 },
-  offset: { x: 130, y: 300 },
+  //offset: { x: 130, y: 300 },
+  offset: { x: 130, y: 130 },
   ratio: 2.9296875, // 3000 / 1024
   //framerate: 60,
   framerate: 60,
-  ease_power : 23 ,
+  ease_power: 23,
   duration: 120,
   reverse: false,
   video_export: "download",
-  bitrate: 15_000_000
+  bitrate: 15_000_000,
+  vignette_radius: 0.55,
+  vignette_smoothness: 0.2,
 };
 
 const pane = new Pane();
