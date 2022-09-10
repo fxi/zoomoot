@@ -1,7 +1,7 @@
 {
-  "name": "compozoom",
+  "name": "zoomoot",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -17,7 +17,6 @@
     "big.js": "^6.2.1",
     "fabric": "^5.2.1",
     "localforage": "^1.10.0",
-    "split.js": "^1.6.5",
     "tweakpane": "^3.1.0"
   }
 }
