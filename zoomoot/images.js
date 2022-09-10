@@ -298,16 +298,19 @@ export class Images {
       nMissingConf: images.length - 1,
     };
     let first = true;
-    let largest;
+    let largest, h, w;
     for (const img of images) {
+      h = img.h * img.s;
+      w = img.w * img.s;
+
       if (first) {
         first = false;
         stat.maxScale = img.s;
         stat.minScale = img.s;
-        stat.minHeight = img.h;
-        stat.maxHeight = img.h;
-        stat.minWidth = img.w;
-        stat.maxWidth = img.h;
+        stat.minHeight = h;
+        stat.maxHeight = h;
+        stat.minWidth = w;
+        stat.maxWidth = w;
         stat.minLeft = img.x;
         stat.maxLeft = img.x;
         stat.minTop = img.y;
@@ -323,22 +326,22 @@ export class Images {
       }
       if (img.s > stat.maxScale) {
         stat.maxScale = img.s;
-        largest = img;
       }
       if (img.s < stat.minScale) {
         stat.minScale = img.s;
       }
-      if (img.h < stat.minHeight) {
-        stat.minHeight = img.h;
+      if (h < stat.minHeight) {
+        stat.minHeight = h;
       }
-      if (img.h > stat.maxHeight) {
-        stat.maxHeight = img.h;
+      if (h > stat.maxHeight) {
+        stat.maxHeight = h;
       }
-      if (img.w < stat.minWidth) {
-        stat.minWidth = img.w;
+      if (w < stat.minWidth) {
+        stat.minWidth = w;
       }
-      if (img.w > stat.maxWidth) {
-        stat.maxWidth = img.h;
+      if (w > stat.maxWidth) {
+        stat.maxWidth = w;
+        largest = img;
       }
       if (img.x < stat.minLeft) {
         stat.minLeft = img.x;
@@ -360,10 +363,10 @@ export class Images {
      */
     if (largest) {
       /*
-      * TODO: offset should be available 
-      * during the animation. Center could be computed 
-      * at last minutes, withou relaunched getStats
-      */ 
+       * TODO: offset should be available
+       * during the animation. Center could be computed
+       * at last minutes, withou relaunched getStats
+       */
       stat.center.x =
         settings.width -
         settings.offset.x -

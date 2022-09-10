@@ -8,12 +8,12 @@ import { fabric } from "./filter_vignette";
 import Big from "big.js";
 fabric.Object.NUM_FRACTION_DIGITS = 100;
 fabric.Object.prototype.objectCaching = false;
-
+Big.DP = 100;
 //const res = [];
 
 const vignette = new fabric.Image.filters.Vignette({
   radius: settings.vignette_radius,
-  smoothness: settings.vignette_radius,
+  smoothness: settings.vignette_smoothness,
 });
 
 export { fabric };
@@ -331,14 +331,32 @@ export class Editor {
     }
   }
 
+  async updateVignette(opt) {
+    const zo = this;
+    opt = Object.assign(
+      {
+        radius: settings.vignette_radius,
+        smoothness: settings.vignette_smoothness,
+      },
+      opt
+    );
+    vignette.radius = opt.radius;
+    vignette.smoothness = opt.smoothness;
+    const objects = zo._canvas.getObjects();
+    for (const object of objects) {
+      object.applyFilters();
+    }
+    zo.render();
+  }
+
   async updateLimits() {
-    console.log("update limits");
     const zo = this;
     const stat = await zo.getStoreImagesStats();
     zo._zoom_min_max = {
-      min: zo._canvas.width / (stat.maxWidth * stat.maxScale),
-      max: (stat.minWidth * stat.minScale) / zo._canvas.width,
+      min: zo._canvas.width / stat.maxWidth,
+      max: zo._canvas.width / stat.minWidth,
     };
+    zo._n = stat.n;
     zo.setCenterZoomAnim(stat?.center);
   }
 
@@ -360,16 +378,16 @@ export class Editor {
     return zo._zoom_min_max || {};
   }
 
-  async getZoomMin() {
-    const zo = this;
-    const stat = await zo.getStoreImagesStats();
-    return zo._canvas.height / (stat.minHeight * stat.maxScale);
-  }
-  async getZoomMax() {
-    const zo = this;
-    const stat = await zo.getStoreImagesStats();
-    return zo._canvas.height / (stat.maxHeight * stat.minScale);
-  }
+  /*async getZoomMin() {*/
+  /*const zo = this;*/
+  /*const stat = await zo.getStoreImagesStats();*/
+  /*return zo._canvas.height / (stat.minHeight * stat.maxScale);*/
+  /*}*/
+  /*async getZoomMax() {*/
+  /*const zo = this;*/
+  /*const stat = await zo.getStoreImagesStats();*/
+  /*return zo._canvas.height / (stat.maxHeight * stat.minScale);*/
+  /*}*/
 
   zoomToOrigin() {
     const zo = this;
@@ -486,12 +504,13 @@ export class Editor {
       }
 
       /**
+       * Precompute steps for performance
        * Uses big.js to handle very large significant numbers
        */
       if (s.reverse) {
         for (let i = zo._animate_steps_n; i >= 0; i--) {
           const percent = i / zo._animate_steps_n;
-          const zoom = zo._big_step(percent);
+          const zoom = zo._big_step(percent).toPrecision();
           steps.push({
             percent: 1 - percent,
             zoom,
@@ -500,7 +519,7 @@ export class Editor {
       } else {
         for (let i = 0; i <= zo._animate_steps_n; i++) {
           const percent = i / zo._animate_steps_n;
-          const zoom = zo._big_step(percent);
+          const zoom = zo._big_step(percent).toPrecision();
           steps.push({
             percent,
             zoom,
@@ -509,10 +528,11 @@ export class Editor {
       }
 
       for (const step of steps) {
-        if (zo._animate) {
-          await zo._animate_step(step);
-          await zo.nextFrame();
+        if (!zo._animate) {
+          continue;
         }
+        await zo._animate_step(step);
+        await zo.nextFrame();
       }
 
       if (zo._recording) {
@@ -521,9 +541,8 @@ export class Editor {
     } catch (e) {
       console.error(e);
     } finally {
-      zo.setProgress(-1);
       zo.stop();
-      zo._recording = false;
+      zo.setProgress(-1);
       delete zo._mp4_encoder;
     }
   }
@@ -548,9 +567,10 @@ export class Editor {
 
   stop() {
     const zo = this;
-    this._animate = false;
+    zo._animate = false;
     if (zo._recording) {
       delete zo._mp4_encoder;
+      zo._recording = false;
     }
   }
 
@@ -562,9 +582,14 @@ export class Editor {
   }
 
   _big_ease(percent) {
-    const p = Big(percent);
-    const b = Big(1);
-    return b.minus(p.pow(settings.ease_power || 2));
+    // using https://easings.net/
+    const zo = this;
+    const one = Big(1);
+    // ease easeInOutSine
+    const eased = -(Math.cos(Math.PI * percent) - 1) / 2;
+    // normalize easeOutExpo
+    const pow = Big(Math.pow(zo._n || 20, -10 * eased));
+    return one.minus(pow);
   }
 
   _big_zoom(bigP) {
@@ -587,12 +612,10 @@ export class Editor {
       console.warn("No step to animate :/");
       return;
     }
-    const zoom = step.zoom;
-    const z = zoom instanceof Big ? zoom.toPrecision() : zoom;
     /**
      * Animation
      */
-    zo.setZoom(z);
+    zo.setZoom(step.zoom);
     zo.setProgress(step.percent);
     if (zo._recording) {
       /*
@@ -607,7 +630,6 @@ export class Editor {
     const zo = this;
     const zmm = zo.getZoomMinMaxCache();
 
-    console.log(zmm);
     if (zo._recording) {
       return;
     }
