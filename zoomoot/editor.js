@@ -508,6 +508,7 @@ export class Editor {
        * Uses big.js to handle very large significant numbers
        */
       if (s.reverse) {
+        zo.zoomToLargest();
         for (let i = zo._animate_steps_n; i >= 0; i--) {
           const percent = i / zo._animate_steps_n;
           const zoom = zo._big_step(percent).toPrecision();
@@ -517,6 +518,7 @@ export class Editor {
           });
         }
       } else {
+        zo.zoomToSmallest();
         for (let i = 0; i <= zo._animate_steps_n; i++) {
           const percent = i / zo._animate_steps_n;
           const zoom = zo._big_step(percent).toPrecision();

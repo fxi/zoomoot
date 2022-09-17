@@ -57,7 +57,7 @@ export class Images {
       }
     }
     zo._el_gallery.appendChild(frag);
-    zo.initSortable();
+    //zo.initSortable();
   }
 
   async removeImage(id) {
@@ -398,6 +398,7 @@ export class Images {
       title: imgObj.id,
       width: width,
       height: height,
+      draggable : false,
       src: imgObj.src,
       style: {
         display: "block",
@@ -440,6 +441,12 @@ export class Images {
   }
 
   initSortable() {
+    /**
+    * Not used. 
+    * TODO:
+    * - Order should be independent of image data 
+    * - check branch feature/order 
+    */
     const zo = this;
     if (!zo._images_sortable) {
       zo._images_sortable = new Swappable(zo._el_gallery, {
